@@ -4,6 +4,10 @@ function log {
 	echo -e "\n[+] $1\n"
 }
 
+function err {
+	echo -e "\n[x] $1\n"
+}
+
 function poll_ready {
 	local svc=$1
 	local url=$2
@@ -20,15 +24,29 @@ function poll_ready {
 		label="com.docker.compose.service=${svc}"
 	fi
 
-	local -i result=1
 	local cid
+	# retry for max 60s (30*2s)
+	for _ in $(seq 1 30); do
+		cid="$(docker container ls -aq -f label="$label")"
+		if [ -n "$cid" ]; then
+			break
+		fi
+
+		echo -n '.'
+		sleep 2
+	done
+	if [ -z "${cid:-}" ]; then
+		err "Timed out waiting for creation of container with label ${label}"
+		return 1
+	fi
+
+	local -i result=1
 	local output
 
 	# retry for max 180s (36*5s)
 	for _ in $(seq 1 36); do
-		cid="$(docker ps -q -f label="$label")"
-		if [ -z "${cid:-}" ]; then
-			echo "Container exited"
+		if [[ $(docker container inspect "$cid" --format '{{ .State.Status}}') == 'exited' ]]; then
+			err "Container exited ($(docker container inspect "$cid" --format '{{ .Name }}'))"
 			return 1
 		fi
 
@@ -40,7 +58,7 @@ function poll_ready {
 			break
 		fi
 
-		echo -n '.'
+		echo -n 'x'
 		sleep 5
 	done
 
